@@ -20,10 +20,11 @@ export type Mod1 = Mod & {
           }
     )
 
-const fs: typeof import('fs') = (0, eval)("require('fs')")
+import { CCAudioRecorder } from './audio'
+import { CCVideoRecorder } from './video'
 
-import * as Mp4Muxer from 'mp4-muxer'
-import { audio } from './audio'
+import ffmpeg from 'fluent-ffmpeg'
+const fs: typeof import('fs') = (0, eval)("require('fs')")
 
 export default class CCRecord implements PluginClass {
     static dir: string
@@ -39,148 +40,98 @@ export default class CCRecord implements PluginClass {
         CCRecord.baseDataPath = `assets/mod-data/cc-record`
     }
 
-    recording: boolean = true
-    fps: number = 30
-
-    lastFrameTime: number = 0
-    frameNumber: number = 0
-
-    fileWritePromises: Promise<void>[] = []
-    canvas!: HTMLCanvasElement
-    context!: CanvasRenderingContext2D
-    drawing: boolean = false
-
-    muxer!: Mp4Muxer.Muxer<Mp4Muxer.ArrayBufferTarget>
-    videoEncoder!: VideoEncoder
-
-    startDate!: number
+    videoRecorder!: CCVideoRecorder
+    audioRecorder!: CCAudioRecorder
 
     prestart(): void | Promise<void> {
-        this.canvas = document.createElement('canvas') // document.getElementById('canvas')! as HTMLCanvasElement
-        this.context = this.canvas.getContext('2d')!
-
-        const self = this
-        ig.Game.inject({
-            draw() {
-                this.parent()
-
-                if (self.drawing || !self.recording) return
-                const now = Date.now()
-                if (self.lastFrameTime + 1000 / self.fps < now) {
-                    self.takeScreenshot(now)
-                    self.lastFrameTime = now
-                }
-            },
-        })
-
-        audio()
+        this.videoRecorder = new CCVideoRecorder(this)
+        this.audioRecorder = new CCAudioRecorder(this)
     }
+
     poststart(): void | Promise<void> {
-        // this.initRecording()
+        this.startRecording()
     }
 
-    takeScreenshot(now: number) {
-        if (!this.videoEncoder) return
+    recordIndex: number = 0
+    recording: boolean = false
+    terminated: boolean = false
 
-        this.drawFrameToCanvas(this.context)
-        this.renderCanvasToVideoFrameAndEncode(this.canvas, this.videoEncoder, this.frameNumber, this.fps, now)
-        this.frameNumber++
+    async startRecording() {
+        if (this.terminated) return
+        this.recording = true
+        /** in seconds */
+        const fragmentSize = 60 * 5
 
-        if (this.frameNumber >= this.fps * 20) {
-            this.finalizeVideo()
-        }
+        const vidPath = `${CCRecord.baseDataPath}/video${this.recordIndex}.mp4`
+        this.videoRecorder.startRecording(fragmentSize, vidPath, 1_000_000, 30)
+
+        const audioPath = `${CCRecord.baseDataPath}/audio${this.recordIndex}.wav`
+        this.audioRecorder.startRecording(fragmentSize, audioPath)
     }
 
-    async initRecording() {
-        this.canvas.width = ig.system.width
-        this.canvas.height = ig.system.height
-
-        this.context = this.canvas.getContext('2d', {
-            // Desynchronizes the canvas paint cycle from the event loop
-            // Should be less necessary with OffscreenCanvas, but with a real canvas you will want this
-            desynchronized: true,
-        })!
-
-        this.muxer = new Mp4Muxer.Muxer({
-            target: new Mp4Muxer.ArrayBufferTarget(),
-
-            video: {
-                // If you change this, make sure to change the VideoEncoder codec as well
-                codec: 'avc',
-                width: this.canvas.width,
-                height: this.canvas.height,
-            },
-
-            // mp4-muxer docs claim you should always use this with ArrayBufferTarget
-            fastStart: 'in-memory',
-        })
-
-        this.videoEncoder = new VideoEncoder({
-            output: (chunk, meta) => this.muxer.addVideoChunk(chunk, meta),
-            error: e => console.error(e),
-        })
-
-        // This codec should work in most browsers
-        // See https://dmnsgn.github.io/media-codecs for list of codecs and see if your browser supports
-        this.videoEncoder.configure({
-            // codec: 'avc1.42001f',
-            codec: 'avc1.42003e',
-            width: this.canvas.width,
-            height: this.canvas.height,
-            bitrate: 1_000_000,
-            bitrateMode: 'variable',
-            latencyMode: 'quality',
-        })
-    }
-
-    async finalizeVideo() {
+    async stopRecording() {
         this.recording = false
-        // Forces all pending encodes to complete
-        await this.videoEncoder.flush()
+        await Promise.all([this.videoRecorder.stopRecording(), this.audioRecorder.stopRecording()])
+    }
 
-        this.muxer.finalize()
+    async terminateAll() {
+        if (this.terminated) return
 
-        let buffer = Buffer.from(this.muxer.target.buffer)
+        console.log('termintaing all!!')
+        this.terminated = true
+        this.recording = false
+        await Promise.all([this.videoRecorder.terminate(), this.audioRecorder.terminate()])
+    }
 
-        const vidPath = `${CCRecord.baseDataPath}/vid.mp4`
-        fs.promises.writeFile(vidPath, buffer).then(() => {
-            console.log('written', vidPath)
+    /** it's called from CCVideoRecorder#drawAndPushNewFrame */
+    async startNewFragment() {
+        if (this.terminated) return
+        await this.stopRecording()
+
+        const index = this.recordIndex
+        const videoPath = this.videoRecorder.videoPath
+        const audioPath = this.audioRecorder.audioPath
+        const outPath = `${CCRecord.baseDataPath}/final${index}.mp4`
+        this.combineVideoAndAudio(this.videoRecorder.videoPath, this.audioRecorder.audioPath, outPath)
+            .catch(err => {
+                console.log(`${index}: Combining: An error occurred:`, err.message)
+                this.terminateAll()
+            })
+            .then(() => {
+                console.log(`${index}: Combining files finished!`)
+                this.deleteFiles(videoPath, audioPath)
+            })
+
+        this.recordIndex++
+        // if (this.recordIndex >= 1) return
+        this.startRecording()
+    }
+
+    async combineVideoAndAudio(videoPath: string, audioPath: string, outPath: string) {
+        // console.log('combining', videoPath, 'and', audioPath)
+
+        let cmd: ffmpeg.FfmpegCommand
+        return new Promise<void>((resolve, reject) => {
+            cmd = ffmpeg()
+                .on('error', function (err) {
+                    reject(err)
+                })
+                .on('end', function () {
+                    resolve()
+                })
+                .addOptions([
+                    `-i ${videoPath}`,
+                    `-i ${audioPath}`,
+                    '-c:v copy',
+                    '-c:a aac',
+                    '-hide_banner',
+                    '-loglevel warning',
+                ])
+                .saveToFile(outPath)
         })
     }
 
-    drawFrameToCanvas(ctx: CanvasRenderingContext2D) {
-        const oldContext = ig.system.context
-        const oldContextScale = ig.system.contextScale
-
-        ig.system.context = ctx
-        ig.system.contextScale = 1
-        this.drawing = true
-
-        ig.game.draw()
-
-        ig.system.context = oldContext
-        ig.system.contextScale = oldContextScale
-
-        this.drawing = false
-    }
-
-    async renderCanvasToVideoFrameAndEncode(canvas: HTMLCanvasElement, videoEncoder: VideoEncoder, frameNumber: number, _fps: number, now: number) {
-        // Equally spaces frames out depending on frames per second
-        // const timestamp = frameNumber * 1e6) / fps
-
-        let timestamp = (now - this.startDate) * 1000
-        if (frameNumber == 0) {
-            timestamp = 0
-            this.startDate = now
-        }
-        let frame = new VideoFrame(canvas, {
-            timestamp,
-        })
-
-        // The encode() method of the VideoEncoder interface asynchronously encodes a VideoFrame
-        videoEncoder.encode(frame)
-
-        // The close() method of the VideoFrame interface clears all states and releases the reference to the media resource.
-        frame.close()
+    async deleteFiles(...files: string[]) {
+        return Promise.all(files.map(file => fs.promises.unlink(file)))
     }
 }
