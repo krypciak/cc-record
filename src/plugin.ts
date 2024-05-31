@@ -1,35 +1,19 @@
-import { Mod, PluginClass } from 'ultimate-crosscode-typedefs/modloader/mod'
-
-export type Mod1 = Mod & {
-    isCCModPacked: boolean
-    findAllAssets?(): void /* only there for ccl2, used to set isCCL3 */
-} & (
-        | {
-              isCCL3: true
-              id: string
-              findAllAssets(): void
-          }
-        | {
-              isCCL3: false
-              name: string
-              filemanager: {
-                  findFiles(dir: string, exts: string[]): Promise<string[]>
-              }
-              getAsset(path: string): string
-              runtimeAssets: Record<string, string>
-          }
-    )
-
+import { PluginClass } from 'ultimate-crosscode-typedefs/modloader/mod'
+import { Opts, initOptionsPoststart, initOptionsPrestart, qualitySliderData } from './options'
 import { CCAudioRecorder } from './audio'
 import { CCVideoRecorder } from './video'
 
 import ffmpeg from 'fluent-ffmpeg'
+import { Mod1 } from './types'
 const fs: typeof import('fs') = (0, eval)("require('fs')")
 
 export default class CCRecord implements PluginClass {
     static dir: string
     static mod: Mod1
     static baseDataPath: string
+
+    /** also used by CrossedEyes */
+    recordingEventListeners: ((status: boolean) => void)[] = []
 
     constructor(mod: Mod1) {
         CCRecord.dir = mod.baseDirectory
@@ -38,18 +22,26 @@ export default class CCRecord implements PluginClass {
         CCRecord.mod.isCCModPacked = mod.baseDirectory.endsWith('.ccmod/')
 
         CCRecord.baseDataPath = `assets/mod-data/cc-record`
+
+        window.sc ??= {} as any
+        sc.ccrecord = this
     }
 
     videoRecorder!: CCVideoRecorder
     audioRecorder!: CCAudioRecorder
 
     prestart(): void | Promise<void> {
+        initOptionsPrestart(this)
+
         this.videoRecorder = new CCVideoRecorder(this)
         this.audioRecorder = new CCAudioRecorder(this)
     }
 
     poststart(): void | Promise<void> {
-        this.startRecording()
+        initOptionsPoststart()
+        if (Opts.ccrecordAutomaticlyRecord) {
+            this.startRecording()
+        }
     }
 
     recordIndex: number = 0
@@ -58,12 +50,16 @@ export default class CCRecord implements PluginClass {
 
     async startRecording() {
         if (this.terminated) return
+
         this.recording = true
+
         /** in seconds */
         const fragmentSize = 60 * 5
 
         const vidPath = `${CCRecord.baseDataPath}/video${this.recordIndex}.mp4`
-        this.videoRecorder.startRecording(fragmentSize, vidPath, 1_000_000, 30)
+        const videoBitrate = qualitySliderData[Opts.ccrecordQuality]
+        console.log(videoBitrate)
+        this.videoRecorder.startRecording(fragmentSize, vidPath, videoBitrate, 30)
 
         const audioPath = `${CCRecord.baseDataPath}/audio${this.recordIndex}.wav`
         this.audioRecorder.startRecording(fragmentSize, audioPath)
@@ -71,20 +67,22 @@ export default class CCRecord implements PluginClass {
 
     async stopRecording() {
         this.recording = false
+
         await Promise.all([this.videoRecorder.stopRecording(), this.audioRecorder.stopRecording()])
     }
 
     async terminateAll() {
         if (this.terminated) return
+        this.terminated = true
+
+        this.recording = false
+        for (const e of this.recordingEventListeners) e(false)
 
         console.log('termintaing all!!')
-        this.terminated = true
-        this.recording = false
         await Promise.all([this.videoRecorder.terminate(), this.audioRecorder.terminate()])
     }
 
-    /** it's called from CCVideoRecorder#drawAndPushNewFrame */
-    async startNewFragment() {
+    async finalizeFragment() {
         if (this.terminated) return
         await this.stopRecording()
 
@@ -103,7 +101,14 @@ export default class CCRecord implements PluginClass {
             })
 
         this.recordIndex++
-        // if (this.recordIndex >= 1) return
+    }
+
+    /** it's called from CCVideoRecorder#drawAndPushNewFrame */
+    async startNewFragment() {
+        if (this.terminated) return
+        await this.finalizeFragment()
+
+        if (this.recordIndex >= 1) return
         this.startRecording()
     }
 

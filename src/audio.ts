@@ -12,7 +12,7 @@ export class CCAudioRecorder {
 
     constructor(public ccrecord: CCRecord) {}
 
-    startRecording(fragmentSize: number, audioPath: string) {
+    async startRecording(fragmentSize: number, audioPath: string) {
         this.justKilledPolitely = false
 
         /* the fragment will end when CCVideoRecorder says so */
@@ -25,7 +25,7 @@ export class CCAudioRecorder {
         window.__dirname = process.cwd()
 
         if (process.platform == 'linux') {
-            this.ffmpegInstance = this.recordLinux(audioPath, this.fragmentSize)
+            this.ffmpegInstance = await this.recordLinux(audioPath, this.fragmentSize)
         }
 
         if (this.ffmpegInstance) {
@@ -33,9 +33,21 @@ export class CCAudioRecorder {
         }
     }
 
-    private recordLinux(outFilePath: string, duration: number): ffmpeg.FfmpegCommand {
+    private async recordLinux(outFilePath: string, duration: number): Promise<ffmpeg.FfmpegCommand> {
         // ffmpeg -f pulse -i 71 -acodec copy output.wav
         //ffmpeg()
+        async function getActiveSource(): Promise<number> {
+            return new Promise<number>(resolve => {
+                const { exec } = require('child_process')
+                const command = `pactl list short sources | grep 'RUNNING' | awk '{print $1}' | head --lines 1`
+
+                exec(command, (_error: any, stdout: any, _stderr: any) => {
+                    resolve(Number(stdout))
+                })
+            })
+        }
+        const sourceId = await getActiveSource()
+
         let resolve: () => void
         this.finishPromise = new Promise<void>(r => {
             resolve = r
@@ -55,7 +67,7 @@ export class CCAudioRecorder {
                 resolve()
             })
             .duration(duration)
-            .addOptions(['-f pulse', '-i 71', '-acodec copy'])
+            .addOptions(['-f pulse', `-i ${sourceId}`, '-acodec copy'])
             .saveToFile(outFilePath)
     }
 
