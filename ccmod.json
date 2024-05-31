@@ -1,0 +1,16 @@
+{
+    "id": "cc-record",
+    "version": "0.0.3",
+    "title": "Record",
+    "description": "Record",
+    "repository": "https://github.com/krypciak/cc-record",
+    "tags": ["QoL", "library"],
+    "authors": "krypek",
+    "icons": {
+        "24": "icon/icon.png"
+    },
+    "dependencies": {
+        "crosscode": ">=1.4.0"
+    },
+    "plugin": "plugin.js"
+}
