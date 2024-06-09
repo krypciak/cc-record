@@ -85,7 +85,7 @@ export class CCVideoRecorder {
             latencyMode: 'quality',
         })
 
-        console.log(`${this.ccrecord.recordIndex}: started video recording`)
+        if (CCRecord.log) console.log(`${this.ccrecord.recordIndex}: started video recording`)
     }
 
     private drawAndPushNewFrame(now: number) {
@@ -98,11 +98,11 @@ export class CCVideoRecorder {
 
     private async finalizeRecording() {
         // Forces all pending encodes to complete
-        await this.videoEncoder.flush()
+        await this.videoEncoder?.flush()
 
         if (!this.muxerFinalized) {
             this.muxerFinalized = true
-            this.muxer.finalize()
+            this.muxer?.finalize()
         }
     }
 

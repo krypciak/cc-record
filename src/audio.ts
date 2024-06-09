@@ -21,15 +21,12 @@ export class CCAudioRecorder {
 
         this.fragmentSize = fragmentSize
 
-        /* fix fluent-ffmpeg crashing */
-        window.__dirname = process.cwd()
-
         if (process.platform == 'linux') {
             this.ffmpegInstance = await this.recordLinux(audioPath, this.fragmentSize)
         }
 
         if (this.ffmpegInstance) {
-            console.log(`${this.ccrecord.recordIndex}: started audio recording`)
+            if (CCRecord.log) console.log(`${this.ccrecord.recordIndex}: started audio recording`)
         }
     }
 
@@ -62,7 +59,7 @@ export class CCAudioRecorder {
                 }
             })
             .on('end', () => {
-                console.log('Audio writing finished!')
+                if (CCRecord.log) console.log('Audio writing finished!')
                 if (!this.justKilledPolitely) this.ccrecord.startNewFragment()
                 resolve()
             })
@@ -73,11 +70,11 @@ export class CCAudioRecorder {
 
     async stopRecording() {
         this.justKilledPolitely = true
-        this.ffmpegInstance.kill('SIGTERM')
+        this.ffmpegInstance?.kill('SIGTERM')
         await this.finishPromise
     }
 
     async terminate() {
-        this.ffmpegInstance.kill('SIGKILL')
+        this.ffmpegInstance?.kill('SIGKILL')
     }
 }
