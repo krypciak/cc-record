@@ -19,6 +19,7 @@ async function doesFileExist(path: string): Promise<boolean> {
     })
 }
 
+/* FFmpeg */
 let ffmpegPath!: string
 
 async function isFFmpegInstalledNow(): Promise<boolean> {
@@ -54,7 +55,6 @@ async function unpackFileFromZip(data: ArrayBuffer, fileName: string, outFilePat
     return fs.promises.writeFile(outFilePath, fileData)
 }
 
-/** does not require administrator privilages */
 export async function installFFmpegWindows() {
     const ffmpegZipPath = `${CCRecord.baseDataPath}/temp/ffmpeg.zip`
     let data: ArrayBuffer
@@ -69,13 +69,43 @@ export async function installFFmpegWindows() {
     return unpackFileFromZip(data, 'ffmpeg.exe', ffmpegPath)
 }
 
-// private testCommandReturnStats(command: string): Promise<boolean> {
-//     const { exec } = require('child_process')
-//
-//     return new Promise(resolve => {
-//         exec(command, { encoding: 'utf8' }, (error: any, stdout: any) => {
-//             console.log(error, stdout)
-//             return !error
-//         })
-//     })
-// }
+/* Windows Desktop Audio Recorder (wdar) https://github.com/krypciak/windows-desktop-audio-recorder */
+export let wdarPath: string
+
+export async function isWdarInstalled(): Promise<boolean> {
+    wdarPath = `${CCRecord.baseDataPath}/windows-desktop-audio-recorder.exe`
+    return doesFileExist(wdarPath)
+}
+
+export async function installWdar() {
+    const wdarZipPath = `${CCRecord.baseDataPath}/temp/windows-desktop-audio-recorder.zip`
+    let data: ArrayBuffer
+    if (!(await doesFileExist(wdarZipPath))) {
+        const url =
+            'https://github.com/krypciak/windows-desktop-audio-recorder/releases/download/v1.0.0/windows-desktop-audio-recorder.zip'
+        const resp = await fetch(url)
+        data = await resp.arrayBuffer()
+    } else {
+        data = await fs.promises.readFile(wdarZipPath)
+    }
+
+    return unpackFileFromZip(data, 'windows-desktop-audio-recorder.exe', wdarPath)
+}
+
+/* send_ctrl_c (scc) (used to stop wdar) https://gist.github.com/rdp/f51fb274d69c5c31b6be */
+
+export let sccPath: string
+
+export async function isSccInstalled(): Promise<boolean> {
+    sccPath = `${CCRecord.baseDataPath}/send_ctrl_c.exe`
+    return doesFileExist(sccPath)
+}
+
+export async function installScc() {
+    let data: ArrayBuffer
+    const url = 'https://github.com/krypciak/windows-desktop-audio-recorder/releases/download/v1.0.0/send_ctrl_c.exe'
+    const resp = await fetch(url)
+    data = await resp.arrayBuffer()
+
+    return fs.promises.writeFile(sccPath, Buffer.from(data))
+}

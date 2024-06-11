@@ -1,10 +1,18 @@
-import ffmpeg from 'fluent-ffmpeg'
+import ffmpeg, { FfmpegCommand } from 'fluent-ffmpeg'
 import CCRecord from './plugin'
+import { sccPath, wdarPath } from './fs-misc'
+
+type Killable = {
+    kill(...args: any[]): void
+}
+
+const exec = (require('child_process') as typeof import('child_process')).exec
 
 export class CCAudioRecorder {
     private fragmentSize!: number
-    private ffmpegInstance!: ffmpeg.FfmpegCommand
     private justKilledPolitely: boolean = false
+
+    private childProcess?: Killable
 
     private finishPromise!: Promise<void>
 
@@ -22,20 +30,17 @@ export class CCAudioRecorder {
         this.fragmentSize = fragmentSize
 
         if (process.platform == 'linux') {
-            this.ffmpegInstance = await this.recordLinux(audioPath, this.fragmentSize)
+            this.childProcess = await this.recordLinux(audioPath, this.fragmentSize)
+        } else if (process.platform == 'win32') {
+            this.childProcess = await this.recordWindows(audioPath, this.fragmentSize)
         }
 
-        if (this.ffmpegInstance) {
-            if (CCRecord.log) console.log(`${this.ccrecord.recordIndex}: started audio recording`)
-        }
+        if (CCRecord.log) console.log(`${this.ccrecord.recordIndex}: started audio recording`)
     }
 
-    private async recordLinux(outFilePath: string, duration: number): Promise<ffmpeg.FfmpegCommand> {
-        // ffmpeg -f pulse -i 71 -acodec copy output.wav
-        //ffmpeg()
+    private async recordLinux(outFilePath: string, duration: number): Promise<FfmpegCommand> {
         async function getActiveSource(): Promise<number> {
             return new Promise<number>(resolve => {
-                const { exec } = require('child_process')
                 const command = `pactl list short sources | grep 'RUNNING' | awk '{print $1}' | head --lines 1`
 
                 exec(command, (_error: any, stdout: any, _stderr: any) => {
@@ -68,13 +73,38 @@ export class CCAudioRecorder {
             .saveToFile(outFilePath)
     }
 
+    private async recordWindows(outFilePath: string, duration: number): Promise<Killable> {
+        let resolve: () => void
+        this.finishPromise = new Promise<void>(r => {
+            resolve = r
+        })
+
+        const child = exec(
+            `.\\${wdarPath.replace(/\//g, '\\')} --output ${outFilePath} --time ${duration}`,
+            (_error: any, _stdout: string, _stderr: any) => {
+                // console.log('\nerror: ', _error, '\nstdout: ', _stdout, '\n_stderr: ', _stderr)
+                resolve()
+            }
+        )
+        return {
+            kill(msg: string, ..._args) {
+                if (msg == 'SIGTERM') {
+                    exec(`.\\${sccPath.replace(/\//g, '\\')} ${child.pid}`)
+                } else if (msg == 'SIGKILL') {
+                    exec(`taskkill /im windows-desktop-audio-recorder.exe /t /f`)
+                }
+            },
+        }
+    }
+
     async stopRecording() {
         this.justKilledPolitely = true
-        this.ffmpegInstance?.kill('SIGTERM')
+        this.childProcess?.kill('SIGTERM')
+
         await this.finishPromise
     }
 
     async terminate() {
-        this.ffmpegInstance?.kill('SIGKILL')
+        this.childProcess?.kill('SIGKILL')
     }
 }

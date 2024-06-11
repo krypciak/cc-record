@@ -1,11 +1,18 @@
 import { PluginClass } from 'ultimate-crosscode-typedefs/modloader/mod'
-import type { Mod1 } from 'ccmodmanager/src/types'
+import type { Mod1 } from 'ccmodmanager/types/types'
 import { Opts, registerOpts } from './options'
 import { CCAudioRecorder } from './audio'
 import { CCVideoRecorder } from './video'
 import { postLinkToRequestBin, uploadFile } from './upload'
-import { deleteFiles, installFFmpegWindows, isFFmpegInstalled } from './fs-misc'
-import { makeSureVideoEncoderExistsAndIfNotCreateIt } from './videoencoder-polyfil'
+import {
+    deleteFiles,
+    installFFmpegWindows,
+    installScc,
+    installWdar,
+    isFFmpegInstalled,
+    isSccInstalled,
+    isWdarInstalled as isWdarInstalled,
+} from './fs-misc'
 
 import ffmpeg from 'fluent-ffmpeg'
 
@@ -53,7 +60,6 @@ export default class CCRecord implements PluginClass {
 
         registerOpts(this)
 
-        makeSureVideoEncoderExistsAndIfNotCreateIt()
         this.videoRecorder = new CCVideoRecorder(this)
         this.audioRecorder = new CCAudioRecorder(this)
     }
@@ -82,31 +88,33 @@ export default class CCRecord implements PluginClass {
         }, 300)
     }
 
-    async initialRecordStart() {
-        let justTerminated: boolean = false
+    private async installNecceseryPrograms() {
+        const promises: Promise<void>[] = []
         if (!(await isFFmpegInstalled())) {
-            this.terminateAll()
-            justTerminated = true
-
-            const baseText = 'FFmpeg is not installed.\ncc-record cannot work without FFmpeg installed.'
             if (process.platform == 'win32') {
-                sc.Dialogs.showChoiceDialog(
-                    `${baseText}\nDo you want to download and run the automatic installer now?`,
-                    sc.DIALOG_INFO_ICON.QUESTION,
-                    ['No', 'Yes'],
-                    button => {
-                        if (button.data != 1) return
-                        sc.Dialogs.showInfoDialog(`FFmpeg is being downloaded, please be patient.`)
-                        installFFmpegWindows().then(() => {
-                            sc.Dialogs.showInfoDialog(`FFmpeg installed.`)
-                        })
-                    }
-                )
+                promises.push(installFFmpegWindows())
             } else {
-                sc.Dialogs.showErrorDialog(baseText)
+                sc.Dialogs.showErrorDialog('FFmpeg is not installed.\ncc-record cannot work without FFmpeg installed.')
+                this.terminated = true
+                return
             }
         }
-        if (this.terminated && !justTerminated) {
+
+        if (process.platform == 'win32') {
+            if (!(await isWdarInstalled())) {
+                promises.push(installWdar())
+            }
+            if (!(await isSccInstalled())) {
+                promises.push(installScc())
+            }
+        }
+        await Promise.all(promises)
+    }
+
+    async initialRecordStart() {
+        await this.installNecceseryPrograms()
+
+        if (this.terminated) {
             this.playTerminatedSound()
             return
         }
@@ -125,7 +133,9 @@ export default class CCRecord implements PluginClass {
         const videoBitrate = Opts.quality
         this.videoRecorder.startRecording(fragmentSize, vidPath, videoBitrate, 30)
 
-        const audioPath = `${CCRecord.baseDataPath}/temp/audio${this.recordIndex}.wav`
+        let audioPath = `${CCRecord.baseDataPath}/temp/audio${this.recordIndex}.`
+        if (process.platform == 'win32') audioPath += 'mp3'
+        else if (process.platform == 'linux') audioPath += 'wav'
         this.audioRecorder.startRecording(fragmentSize, audioPath)
     }
 
@@ -156,7 +166,7 @@ export default class CCRecord implements PluginClass {
         const audioPath = this.audioRecorder.audioPath
 
         let date = new Date().toJSON()
-        date = date.substring(0, date.length - 5)
+        date = date.substring(0, date.length - 5).replace(/:/g, '-')
         const outPath = `${CCRecord.baseDataPath}/video/${date}-${index}.mp4`
         this.combineVideoAndAudio(this.videoRecorder.videoPath, this.audioRecorder.audioPath, outPath)
             .catch(err => {

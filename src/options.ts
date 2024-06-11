@@ -9,7 +9,7 @@ export const qualitySliderData: Record<number, number> = {
     1: 500_000,
 }
 
-export let Opts: ReturnType<typeof sc.modMenu.registerAndGetModOptions<ReturnType<typeof registerOpts>>>
+export let Opts: ReturnType<typeof modmanager.registerAndGetModOptions<ReturnType<typeof registerOpts>>>
 
 export function registerOpts(ccrecord: CCRecord) {
     const opts = {
@@ -69,7 +69,7 @@ export function registerOpts(ccrecord: CCRecord) {
         },
     } as const satisfies Options
 
-    Opts = sc.modMenu.registerAndGetModOptions(
+    Opts = modmanager.registerAndGetModOptions(
         {
             modId: 'cc-record',
             title: 'cc-record',
