@@ -130,7 +130,7 @@ export default class CCRecord implements PluginClass {
         this.recording = true
 
         /** in seconds */
-        const fragmentSize = 60 * 1
+        const fragmentSize = 60 * 5
 
         const vidPath = `${CCRecord.baseDataPath}/temp/video${this.recordIndex}.mp4`
         const videoBitrate = Opts.quality
