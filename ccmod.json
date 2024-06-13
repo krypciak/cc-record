@@ -12,7 +12,7 @@
     "dependencies": {
         "crosscode": ">=1.4.0",
         "input-api": ">=1.0.0",
-        "ccmodmanager": ">=0.9.12"
+        "ccmodmanager": ">=0.9.13"
     },
     "plugin": "plugin.js"
 }
