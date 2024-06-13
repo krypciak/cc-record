@@ -84,6 +84,7 @@ export class CCAudioRecorder {
             (_error: any, _stdout: string, _stderr: any) => {
                 // console.log('\nerror: ', _error, '\nstdout: ', _stdout, '\n_stderr: ', _stderr)
                 resolve()
+                if (!this.justKilledPolitely) this.ccrecord.startNewFragment()
             }
         )
         return {
