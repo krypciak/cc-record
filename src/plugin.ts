@@ -108,6 +108,9 @@ export default class CCRecord implements PluginClass {
                 promises.push(installScc())
             }
         }
+        if (promises.length > 0) {
+            sc.Dialogs.showInfoDialog('Downloading necessary tools for recording.\n Please wait...')
+        }
         await Promise.all(promises)
     }
 
