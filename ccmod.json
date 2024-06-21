@@ -2,7 +2,7 @@
     "id": "cc-record",
     "version": "1.0.2",
     "title": "Record",
-    "description": "Record",
+    "description": "Record CrossCode gameplay. Records the CrossCode window and ALL desktop audio!",
     "repository": "https://github.com/krypciak/cc-record",
     "tags": ["QoL", "library"],
     "authors": "krypek",
