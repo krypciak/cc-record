@@ -1,6 +1,6 @@
-import ffmpeg, { FfmpegCommand } from 'fluent-ffmpeg'
 import CCRecord from './plugin'
 import { sccPath, wdarPath } from './fs-misc'
+import { ChildProcess } from 'child_process'
 
 type Killable = {
     kill(...args: any[]): void
@@ -38,7 +38,7 @@ export class CCAudioRecorder {
         if (CCRecord.log) console.log(`${this.ccrecord.recordIndex}: started audio recording`)
     }
 
-    private async recordLinux(outFilePath: string, duration: number): Promise<FfmpegCommand> {
+    private async recordLinux(outFilePath: string, duration: number): Promise<ChildProcess> {
         async function getActiveSource(): Promise<number> {
             return new Promise<number>(resolve => {
                 const command = `pactl list short sources | grep 'RUNNING' | awk '{print $1}' | head --lines 1`
@@ -54,23 +54,24 @@ export class CCAudioRecorder {
         this.finishPromise = new Promise<void>(r => {
             resolve = r
         })
-        return ffmpeg()
-            .on('error', err => {
-                if (this.justKilledPolitely && !this.ccrecord.terminated) {
-                    resolve()
-                } else {
-                    console.log('Audio recording: An error occurred: ' + err.message)
-                    this.ccrecord.terminateAll()
+        const child = exec(
+            `ffmpeg -f pulse -i ${sourceId} -acodec copy -t ${duration} ${outFilePath}`,
+            (error: any, _stdout: string, stderr: any) => {
+                if (error || stderr) {
+                    if (this.justKilledPolitely && !this.ccrecord.terminated) {
+                        resolve()
+                    } else {
+                        console.log('Audio recording: An error occurred: ' + error + stderr)
+                        this.ccrecord.terminateAll()
+                    }
+                    return
                 }
-            })
-            .on('end', () => {
                 if (CCRecord.log) console.log('Audio writing finished!')
                 if (!this.justKilledPolitely) this.ccrecord.startNewFragment()
                 resolve()
-            })
-            .duration(duration)
-            .addOptions(['-f pulse', `-i ${sourceId}`, '-acodec copy'])
-            .saveToFile(outFilePath)
+            }
+        )
+        return child
     }
 
     private async recordWindows(outFilePath: string, duration: number): Promise<Killable> {
